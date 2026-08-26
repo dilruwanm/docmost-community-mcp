@@ -1,0 +1,54 @@
+{
+  "name": "docmost-community-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for self-hosted Docmost Community Edition",
+  "type": "module",
+  "bin": {
+    "docmost-community-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx --test src/util.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "docmost",
+    "mcp",
+    "model-context-protocol",
+    "wiki",
+    "community-edition"
+  ],
+  "license": "MIT",
+  "author": "dilruwanm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dilruwanm/docmost-community-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dilruwanm/docmost-community-mcp/issues"
+  },
+  "homepage": "https://github.com/dilruwanm/docmost-community-mcp#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}
