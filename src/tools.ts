@@ -49,6 +49,10 @@ function wrap(
   };
 }
 
+async function resolvePage(client: DocmostClient, value: unknown): Promise<string | undefined> {
+  return value ? client.resolvePageId(String(value)) : undefined;
+}
+
 export function registerTools(server: McpServer, client: DocmostClient): void {
   registerPageTools(server, client);
   registerSpaceTools(server, client);
@@ -138,7 +142,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
         space_id: spaceId,
         title: z.string().min(1).describe("Page title"),
         markdown: z.string().optional().describe("Page body as Markdown"),
-        parent_page_id: z.string().optional().describe("Parent page UUID to nest under"),
+        parent_page_id: z.string().optional().describe("Parent page UUID or slugId to nest under"),
         icon: z.string().optional().describe("Page icon, usually an emoji"),
       },
     },
@@ -149,7 +153,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       const created = (await client.request("/pages/create", {
         spaceId: resolvedSpaceId,
         title: args.title,
-        parentPageId: args.parent_page_id,
+        parentPageId: await resolvePage(client, args.parent_page_id),
         icon: args.icon,
         ...(markdown
           ? { content: markdown, format: "markdown" }
@@ -269,7 +273,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       }
       const result = asItems(
         await client.request("/pages/sidebar-pages", {
-          pageId: args.page_id,
+          pageId: await resolvePage(client, args.page_id),
           spaceId: args.space_id
             ? await client.resolveSpaceId(String(args.space_id))
             : undefined,
@@ -291,7 +295,9 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("write"),
       inputSchema: { page_id: pageId },
     },
-    wrap(client, "write", async (args) => client.request("/pages/duplicate", { pageId: args.page_id })),
+    wrap(client, "write", async (args) =>
+      client.request("/pages/duplicate", { pageId: await resolvePage(client, args.page_id) }),
+    ),
   );
 
   server.registerTool(
@@ -306,7 +312,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     },
     wrap(client, "write", async (args) =>
       client.request("/pages/duplicate", {
-        pageId: args.page_id,
+        pageId: await resolvePage(client, args.page_id),
         spaceId: await client.resolveSpaceId(String(args.space_id)),
       }),
     ),
@@ -323,26 +329,29 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           .string()
           .nullable()
           .optional()
-          .describe("New parent page UUID. Null or omitted with root=true moves to space root"),
+          .describe("New parent page UUID or slugId. Null or omitted with root=true moves to space root"),
         root: z.boolean().optional().describe("Move to the space root"),
         position: z
           .enum(["first", "last"])
           .or(z.string().min(5).max(12))
           .optional()
           .describe("first, last, or an explicit fractional index"),
-        after_page_id: z.string().optional().describe("Place after this sibling page"),
+        after_page_id: z.string().optional().describe("Place after this sibling page (UUID or slugId)"),
       },
     },
     wrap(client, "write", async (args) => {
-      const parentPageId = args.root ? null : (args.parent_page_id as string | null | undefined);
+      const pageIdValue = await client.resolvePageId(String(args.page_id));
+      const parentPageId = args.root || args.parent_page_id === null
+        ? null
+        : await resolvePage(client, args.parent_page_id);
       const position = await client.computeMovePosition({
-        pageId: String(args.page_id),
+        pageId: pageIdValue,
         parentPageId,
         position: args.position as "first" | "last" | string | undefined,
-        afterPageId: args.after_page_id as string | undefined,
+        afterPageId: await resolvePage(client, args.after_page_id),
       });
       return client.request("/pages/move", {
-        pageId: args.page_id,
+        pageId: pageIdValue,
         parentPageId,
         position,
       });
@@ -361,7 +370,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     },
     wrap(client, "write", async (args) =>
       client.request("/pages/move-to-space", {
-        pageId: args.page_id,
+        pageId: await resolvePage(client, args.page_id),
         spaceId: await client.resolveSpaceId(String(args.space_id)),
       }),
     ),
@@ -378,12 +387,13 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       },
     },
     wrap(client, "destructive", async (args) => {
+      const pageIdValue = await client.resolvePageId(String(args.page_id));
       await client.request("/pages/delete", {
-        pageId: args.page_id,
+        pageId: pageIdValue,
         permanentlyDelete: Boolean(args.permanently),
       });
       return {
-        pageId: args.page_id,
+        pageId: pageIdValue,
         deleted: true,
         permanent: Boolean(args.permanently),
       };
@@ -397,7 +407,9 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("write"),
       inputSchema: { page_id: pageId },
     },
-    wrap(client, "write", async (args) => pageSummary(await client.request("/pages/restore", { pageId: args.page_id }))),
+    wrap(client, "write", async (args) =>
+      pageSummary(await client.request("/pages/restore", { pageId: await resolvePage(client, args.page_id) })),
+    ),
   );
 
   server.registerTool(
@@ -429,7 +441,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     wrap(client, "read", async (args) =>
       asItems(
         await client.request("/pages/history", {
-          pageId: args.page_id,
+          pageId: await resolvePage(client, args.page_id),
           limit: args.limit ?? 20,
           cursor: args.cursor,
         }),
@@ -456,7 +468,9 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("read"),
       inputSchema: { page_id: pageId },
     },
-    wrap(client, "read", async (args) => client.request("/pages/breadcrumbs", { pageId: args.page_id })),
+    wrap(client, "read", async (args) =>
+      client.request("/pages/breadcrumbs", { pageId: await resolvePage(client, args.page_id) }),
+    ),
   );
 
   server.registerTool(
@@ -474,7 +488,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     wrap(client, "read", async (args) =>
       asItems(
         await client.request("/pages/backlinks", {
-          pageId: args.page_id,
+          pageId: await resolvePage(client, args.page_id),
           direction: args.direction,
           limit: args.limit ?? 50,
           cursor: args.cursor,
@@ -497,14 +511,15 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
         output_path: z.string().optional().describe("Where to write the exported file"),
       },
     },
-    wrap(client, "read", async (args) =>
-      exportZip(client, "/pages/export", {
-        pageId: args.page_id,
+    wrap(client, "read", async (args) => {
+      const pageIdValue = await client.resolvePageId(String(args.page_id));
+      return exportZip(client, "/pages/export", {
+        pageId: pageIdValue,
         format: args.format ?? "markdown",
         includeChildren: args.include_children,
         includeAttachments: args.include_attachments,
-      }, args.output_path as string | undefined, `page-${args.page_id}`),
-    ),
+      }, args.output_path as string | undefined, `page-${pageIdValue}`);
+    }),
   );
 }
 
@@ -647,7 +662,7 @@ function registerCommentTools(server: McpServer, client: DocmostClient): void {
     wrap(client, "read", async (args) => {
       const result = asItems(
         await client.request("/comments", {
-          pageId: args.page_id,
+          pageId: await resolvePage(client, args.page_id),
           limit: args.limit ?? 50,
           cursor: args.cursor,
         }),
@@ -676,7 +691,7 @@ function registerCommentTools(server: McpServer, client: DocmostClient): void {
     wrap(client, "write", async (args) =>
       commentSummary(
         await client.request("/comments/create", {
-          pageId: args.page_id,
+          pageId: await resolvePage(client, args.page_id),
           content: client.commentContent(String(args.markdown)),
           type: "page",
           parentCommentId: args.parent_comment_id,
@@ -832,7 +847,9 @@ function registerAttachmentTools(server: McpServer, client: DocmostClient): void
         file_path: z.string().min(1).describe("Absolute path to a local file"),
       },
     },
-    wrap(client, "write", async (args) => client.uploadFile(String(args.page_id), String(args.file_path))),
+    wrap(client, "write", async (args) =>
+      client.uploadFile(await client.resolvePageId(String(args.page_id)), String(args.file_path)),
+    ),
   );
 
   server.registerTool(
@@ -859,7 +876,7 @@ function registerLabelTools(server: McpServer, client: DocmostClient): void {
     wrap(client, "read", async (args) =>
       asItems(
         await client.request("/pages/labels", {
-          pageId: args.page_id,
+          pageId: await resolvePage(client, args.page_id),
           limit: args.limit ?? 50,
           cursor: args.cursor,
         }),
@@ -879,7 +896,7 @@ function registerLabelTools(server: McpServer, client: DocmostClient): void {
     },
     wrap(client, "write", async (args) =>
       client.request("/pages/labels/add", {
-        pageId: args.page_id,
+        pageId: await resolvePage(client, args.page_id),
         names: (args.names as string[]).map(normalizeLabel).filter(Boolean),
       }),
     ),
@@ -896,11 +913,12 @@ function registerLabelTools(server: McpServer, client: DocmostClient): void {
       },
     },
     wrap(client, "write", async (args) => {
+      const pageIdValue = await client.resolvePageId(String(args.page_id));
       await client.request("/pages/labels/remove", {
-        pageId: args.page_id,
+        pageId: pageIdValue,
         labelId: args.label_id,
       });
-      return { pageId: args.page_id, labelId: args.label_id, removed: true };
+      return { pageId: pageIdValue, labelId: args.label_id, removed: true };
     }),
   );
 }

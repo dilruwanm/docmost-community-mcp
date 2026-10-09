@@ -104,6 +104,7 @@ claude mcp add docmost --env DOCMOST_URL=https://docs.example.com --env DOCMOST_
 - **stdio only** in this release. Streamable HTTP can be added later.
 - **No Enterprise license, no Docmost database access, no Docmost fork.**
 - Space slugs are accepted anywhere a space id is required.
+- Page slugIds (the id in page URLs) are accepted anywhere a page id is required, and are resolved to UUIDs before the request.
 - `move_page` computes the required fractional `position` key (`first`, `last`, or after a sibling).
 - `create_page` / `update_page` fail clearly on servers older than v0.71 instead of silently dropping the body. `get_current_user` reports `docmostVersion` from Docmost's `currentVersion` field.
 - `delete_space` requires `confirm: true`. Mutating tools honor `DOCMOST_READ_ONLY`.

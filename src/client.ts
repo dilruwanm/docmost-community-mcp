@@ -16,7 +16,7 @@ import {
 } from "./util.js";
 
 export const MIN_WRITE_VERSION = "0.71.0";
-const USER_AGENT = "docmost-community-mcp/1.0.0";
+const USER_AGENT = "docmost-community-mcp/1.0.1";
 
 export type Pagination = {
   limit?: number;
@@ -271,6 +271,19 @@ export class DocmostClient {
       throw new DocmostError(`Space not found: ${spaceIdOrSlug}`);
     }
     return String((match as Json).id);
+  }
+
+  // Only /pages/info and /pages/update accept a slugId; every other page
+  // endpoint expects the UUID, so resolve before calling them.
+  async resolvePageId(pageIdOrSlug: string): Promise<string> {
+    if (isUuid(pageIdOrSlug)) {
+      return pageIdOrSlug;
+    }
+    const page = (await this.request("/pages/info", { pageId: pageIdOrSlug })) as Json | undefined;
+    if (!page || typeof page.id !== "string") {
+      throw new DocmostError(`Page not found: ${pageIdOrSlug}`);
+    }
+    return page.id;
   }
 
   async computeMovePosition(input: {
