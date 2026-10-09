@@ -16,7 +16,7 @@ import {
 } from "./util.js";
 
 export const MIN_WRITE_VERSION = "0.71.0";
-const USER_AGENT = "docmost-community-mcp/1.0.0";
+const USER_AGENT = "docmost-community-mcp/1.0.1";
 
 export type Pagination = {
   limit?: number;

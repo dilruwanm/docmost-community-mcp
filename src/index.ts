@@ -6,7 +6,7 @@ import { loadConfig } from "./config.js";
 import { ConfigError } from "./errors.js";
 import { registerTools } from "./tools.js";
 
-const PACKAGE_VERSION = "1.0.0";
+const PACKAGE_VERSION = "1.0.1";
 
 function createServer(): McpServer {
   const config = loadConfig();
