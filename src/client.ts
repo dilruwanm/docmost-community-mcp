@@ -273,6 +273,19 @@ export class DocmostClient {
     return String((match as Json).id);
   }
 
+  // Only /pages/info and /pages/update accept a slugId; every other page
+  // endpoint expects the UUID, so resolve before calling them.
+  async resolvePageId(pageIdOrSlug: string): Promise<string> {
+    if (isUuid(pageIdOrSlug)) {
+      return pageIdOrSlug;
+    }
+    const page = (await this.request("/pages/info", { pageId: pageIdOrSlug })) as Json | undefined;
+    if (!page || typeof page.id !== "string") {
+      throw new DocmostError(`Page not found: ${pageIdOrSlug}`);
+    }
+    return page.id;
+  }
+
   async computeMovePosition(input: {
     pageId: string;
     parentPageId?: string | null;

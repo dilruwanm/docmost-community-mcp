@@ -17,7 +17,7 @@
     "prepublishOnly": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx --test src/util.test.ts"
+    "test": "tsx --test src/util.test.ts src/client.test.ts"
   },
   "engines": {
     "node": ">=20"
