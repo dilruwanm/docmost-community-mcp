@@ -1,0 +1,26 @@
+{
+  "id": "f0000000-0000-4000-8000-000000000001",
+  "slugId": "zCJAkqa8sl",
+  "title": "Copy of T1 child",
+  "icon": null,
+  "coverPhoto": null,
+  "position": "a162P",
+  "parentPageId": "f0000000-0000-4000-8000-000000000002",
+  "creatorId": "f0000000-0000-4000-8000-000000000003",
+  "lastUpdatedById": "f0000000-0000-4000-8000-000000000003",
+  "spaceId": "f0000000-0000-4000-8000-000000000004",
+  "workspaceId": "f0000000-0000-4000-8000-000000000005",
+  "isLocked": false,
+  "isBase": false,
+  "createdAt": "2026-11-21T12:49:53.052Z",
+  "updatedAt": "2026-11-21T12:49:53.052Z",
+  "deletedAt": null,
+  "contributorIds": [],
+  "space": {
+    "id": "f0000000-0000-4000-8000-000000000004",
+    "name": "MCP Sandbox",
+    "slug": "mcp-sandbox"
+  },
+  "hasChildren": false,
+  "childPageIds": []
+}

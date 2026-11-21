@@ -6,7 +6,7 @@ import { loadConfig } from "./config.js";
 import { ConfigError } from "./errors.js";
 import { registerTools } from "./tools.js";
 
-const PACKAGE_VERSION = "1.0.1";
+const PACKAGE_VERSION = "1.1.0";
 
 function createServer(): McpServer {
   const config = loadConfig();
@@ -15,7 +15,7 @@ function createServer(): McpServer {
     name: "docmost-community-mcp",
     version: PACKAGE_VERSION,
   });
-  registerTools(server, client);
+  registerTools(server, client, config.toolsets);
   return server;
 }
 

@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000007",
+      "slugId": "RcqvRXFE7L",
+      "title": "T1 spike",
+      "icon": null,
+      "position": "a0ByJ",
+      "parentPageId": null,
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "isBase": false,
+      "deletedAt": null,
+      "hasChildren": false,
+      "canEdit": true
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000002",
+      "slugId": "JPgQmHBMZB",
+      "title": "T1 parent",
+      "icon": null,
+      "position": "a13Fz",
+      "parentPageId": null,
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "isBase": false,
+      "deletedAt": null,
+      "hasChildren": true,
+      "canEdit": true
+    }
+  ],
+  "meta": {
+    "limit": 50,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "nextCursor": null,
+    "prevCursor": null
+  }
+}

@@ -1,35 +1,58 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { DocmostClient } from "./client.js";
+import { TOOLSET_NAMES, type ToolsetName } from "./config.js";
 import { DocmostError, VersionError } from "./errors.js";
 import {
   asItems,
   errorResult,
   exportFileName,
+  findSection,
+  MAX_CONTENT_CHARS,
   normalizeLabel,
+  omit,
+  outline,
+  pageAck,
   pageSummary,
+  pick,
   proseMirrorToMarkdown,
+  sectionToMarkdown,
   slugify,
+  slimPage,
+  sliceContent,
   textResult,
   type Json,
+  type PageEdit,
 } from "./util.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
-const pageId = z.string().min(1).describe("Page UUID or slugId");
-const spaceId = z.string().min(1).describe("Space UUID or slug");
-const limit = z.number().int().min(1).max(100).optional().describe("Page size, 1-100");
-const cursor = z.string().optional().describe("Pagination cursor from meta.nextCursor");
+const pageId = z.string().min(1).describe("UUID or slugId");
+const spaceId = z.string().min(1).describe("UUID or slug");
+const limit = z.number().int().min(1).max(100).optional();
+const cursor = z.string().optional().describe("meta.nextCursor");
+const verbose = z.boolean().optional().describe("Full metadata");
+
+const copied = (page: unknown, args: Record<string, unknown>) =>
+  args.verbose ? page : { ...pageAck(page), ...pick(page, ["parentPageId", "childPageIds"]) };
+
+const ack = (page: unknown, args: Record<string, unknown>) => (args.verbose ? pageSummary(page) : pageAck(page));
+
+// The shared space is shown once per list; verbose keeps the full per-item metadata.
+function pageList(items: unknown[], meta: unknown, args: Record<string, unknown>): Json {
+  if (args.verbose) {
+    return { items: items.map(pageSummary), meta };
+  }
+  const space = (items[0] as Json | undefined)?.space;
+  return { ...(space ? { space } : {}), items: items.map(slimPage), meta };
+}
 
 type ToolKind = "read" | "write" | "destructive";
 
+// MCP defaults are readOnlyHint=false, destructiveHint=true, openWorldHint=true, so only what differs is sent.
 function hints(kind: ToolKind) {
-  return {
-    readOnlyHint: kind === "read",
-    destructiveHint: kind === "destructive",
-    openWorldHint: true,
-  };
+  return kind === "read" ? { readOnlyHint: true } : { destructiveHint: kind === "destructive" };
 }
 
 function wrap(
@@ -53,15 +76,34 @@ async function resolvePage(client: DocmostClient, value: unknown): Promise<strin
   return value ? client.resolvePageId(String(value)) : undefined;
 }
 
-export function registerTools(server: McpServer, client: DocmostClient): void {
-  registerPageTools(server, client);
-  registerSpaceTools(server, client);
-  registerCommentTools(server, client);
-  registerSearchTools(server, client);
-  registerWorkspaceTools(server, client);
-  registerAttachmentTools(server, client);
-  registerLabelTools(server, client);
-  registerMemberTools(server, client);
+// Slim every item of a list payload; verbose returns the server payload as before.
+function slimItems(payload: unknown, slim: (item: unknown) => Json, args: Record<string, unknown>): unknown {
+  const result = asItems(payload);
+  return args.verbose ? result : { items: result.items.map(slim), meta: result.meta };
+}
+
+const TOOLSETS: Record<ToolsetName, (server: McpServer, client: DocmostClient) => void> = {
+  pages: registerPageTools,
+  spaces: registerSpaceTools,
+  comments: registerCommentTools,
+  search: registerSearchTools,
+  workspace: registerWorkspaceTools,
+  attachments: registerAttachmentTools,
+  labels: registerLabelTools,
+  members: registerMemberTools,
+};
+
+// Registered in a fixed order whatever order the caller lists them, so the tool list stays stable.
+export function registerTools(
+  server: McpServer,
+  client: DocmostClient,
+  toolsets: readonly ToolsetName[] = TOOLSET_NAMES,
+): void {
+  for (const name of TOOLSET_NAMES) {
+    if (toolsets.includes(name)) {
+      TOOLSETS[name](server, client);
+    }
+  }
 }
 
 function registerPageTools(server: McpServer, client: DocmostClient): void {
@@ -75,6 +117,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
         space_id: spaceId.optional(),
         limit,
         offset: z.number().int().min(0).optional().describe("Result offset"),
+        verbose,
       },
     },
     wrap(client, "read", async (args) => {
@@ -97,10 +140,11 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
             slugId: page.slugId,
             title: page.title,
             icon: page.icon,
-            spaceId: page.spaceId,
+            // Slim: a scoped search shares one space, so only an unscoped search names each item's space.
+            ...(args.verbose ? { spaceId: page.spaceId } : {}),
             highlight: page.highlight,
             rank: page.rank,
-            space: page.space,
+            ...(args.verbose || !args.space_id ? { space: page.space } : {}),
           };
         }),
         meta: result.meta,
@@ -111,22 +155,49 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
   server.registerTool(
     "get_page",
     {
-      description: "Get a page's metadata and Markdown body. Use format=json for raw ProseMirror.",
+      description:
+        "Get page metadata and Markdown body (format=json for ProseMirror). To read less: outline=true lists headings, heading returns one section, max_chars+offset page the body (follow next_offset).",
       annotations: hints("read"),
       inputSchema: {
         page_id: pageId,
-        format: z.enum(["markdown", "html", "json"]).optional().describe("Content format. Default markdown"),
+        format: z.enum(["markdown", "html", "json"]).optional().describe("Default markdown"),
+        outline: z.boolean().optional().describe("Headings only"),
+        heading: z.string().optional().describe("One section as Markdown. Text, or '## Text' to pin the level"),
+        max_chars: z.number().int().min(1).optional().describe("Max characters to return"),
+        offset: z.number().int().min(0).optional().describe("Start position"),
       },
     },
     wrap(client, "read", async (args) => {
-      const format = (args.format as string | undefined) ?? "markdown";
+      const wantsDoc = Boolean(args.outline || args.heading);
+      if (args.outline && args.heading) {
+        throw new DocmostError("Use either outline or heading, not both");
+      }
+      const format = wantsDoc ? "json" : ((args.format as string | undefined) ?? "markdown");
       const page = (await client.request("/pages/info", {
         pageId: args.page_id,
         format,
       })) as Json;
+      let content = page.content;
+      if (wantsDoc) {
+        const doc = (typeof content === "string" ? JSON.parse(content) : content) as Json;
+        if (args.outline) {
+          return { ...pageSummary(page), outline: outline(doc) };
+        }
+        content = sectionToMarkdown(doc, findSection(doc, String(args.heading)));
+      }
+      let paging: Json = {};
+      const paged = args.max_chars !== undefined || args.offset !== undefined;
+      if (paged && typeof content !== "string") {
+        throw new DocmostError("max_chars and offset need format markdown or html");
+      }
+      // shortcut: format=json bodies are not capped (objects cannot be sliced); upgrade if agents hit huge JSON pages.
+      if (typeof content === "string" && (paged || content.length > MAX_CONTENT_CHARS)) {
+        ({ content, ...paging } = sliceContent(content, args.offset as number | undefined, args.max_chars as number | undefined));
+      }
       return {
         ...pageSummary(page),
-        content: page.content,
+        content,
+        ...paging,
         creator: page.creator,
         lastUpdatedBy: page.lastUpdatedBy,
       };
@@ -136,14 +207,15 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
   server.registerTool(
     "create_page",
     {
-      description: "Create a page in a space. Body is Markdown and is persisted in place (Docmost v0.71+). Can nest under a parent.",
+      description: "Create a page in a space from Markdown, optionally under a parent.",
       annotations: hints("write"),
       inputSchema: {
         space_id: spaceId,
         title: z.string().min(1).describe("Page title"),
         markdown: z.string().optional().describe("Page body as Markdown"),
-        parent_page_id: z.string().optional().describe("Parent page UUID or slugId to nest under"),
+        parent_page_id: z.string().optional().describe("Parent UUID or slugId"),
         icon: z.string().optional().describe("Page icon, usually an emoji"),
+        verbose,
       },
     },
     wrap(client, "write", async (args) => {
@@ -175,17 +247,17 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
             operation: "replace",
           });
           await client.confirmMarkdownWrite(updated, markdown);
-          return pageSummary(updated);
+          return ack(updated, args);
         }
       }
-      return pageSummary(created);
+      return ack(created, args);
     }),
   );
 
   server.registerTool(
     "update_page",
     {
-      description: "Update a page title, icon, and/or Markdown body in place. Body writes use the server converter (v0.71+). operation defaults to replace.",
+      description: "Update a page title, icon, and/or Markdown body (operation: replace default, append, prepend). For partial edits use edit_page.",
       annotations: hints("write"),
       inputSchema: {
         page_id: pageId,
@@ -196,6 +268,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           .enum(["replace", "append", "prepend"])
           .optional()
           .describe("How to apply markdown. Default replace"),
+        verbose,
       },
     },
     wrap(client, "write", async (args) => {
@@ -217,15 +290,48 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       if (args.markdown) {
         await client.confirmMarkdownWrite(updated, String(args.markdown));
       }
-      return pageSummary(updated);
+      return ack(updated, args);
     }),
+  );
+
+  server.registerTool(
+    "edit_page",
+    {
+      description:
+        "Edit parts of a page, leaving the rest as is. edits run in order, written once; if any fails nothing is written. Modes: replace_text (old_text must match once in one paragraph, or use replace_all), replace_section (keeps the heading, replaces what is under it), insert_after_section (after its subsections), insert_in_section (at=start, or at=end, the default: end of its own body before any subsection), delete_section. heading is the text, or '## Text' to pin the level.",
+      annotations: hints("write"),
+      inputSchema: {
+        page_id: pageId,
+        edits: z
+          .array(
+            z.object({
+              mode: z.enum(["replace_text", "replace_section", "insert_after_section", "insert_in_section", "delete_section"]),
+              at: z.enum(["start", "end"]).optional(),
+              old_text: z.string().optional(),
+              new_text: z.string().optional(),
+              replace_all: z.boolean().optional(),
+              heading: z.string().optional(),
+              markdown: z.string().optional().describe("Headings, paragraphs, one-level lists, code, bold/italic/code/links only"),
+            }),
+          )
+          .min(1)
+          .max(50),
+        expected_updated_at: z
+          .string()
+          .optional()
+          .describe("updatedAt from get_page; refused if the page changed since"),
+      },
+    },
+    wrap(client, "write", async (args) =>
+      client.editPage(String(args.page_id), args.edits as PageEdit[], args.expected_updated_at as string | undefined),
+    ),
   );
 
   server.registerTool(
     "list_pages",
     {
       description:
-        "List pages in a space. Default view=recent is recently updated pages (not the sidebar tree; General can look empty). Use view=tree for space-root pages in sidebar order, or list_child_pages for children of a page.",
+        "List pages in a space. view=recent (default) is recently updated pages, not the sidebar tree; view=tree is space-root pages in sidebar order. Use list_child_pages for children.",
       annotations: hints("read"),
       inputSchema: {
         space_id: spaceId,
@@ -235,6 +341,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           .describe("recent (default) or tree for sidebar-root pages"),
         limit,
         cursor,
+        verbose,
       },
     },
     wrap(client, "read", async (args) => {
@@ -247,11 +354,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           cursor: args.cursor,
         }),
       );
-      return {
-        view,
-        items: result.items.map(pageSummary),
-        meta: result.meta,
-      };
+      return { view, ...pageList(result.items, result.meta, args) };
     }),
   );
 
@@ -265,6 +368,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
         space_id: spaceId.optional(),
         limit,
         cursor,
+        verbose,
       },
     },
     wrap(client, "read", async (args) => {
@@ -281,10 +385,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           cursor: args.cursor,
         }),
       );
-      return {
-        items: result.items.map(pageSummary),
-        meta: result.meta,
-      };
+      return pageList(result.items, result.meta, args);
     }),
   );
 
@@ -293,10 +394,10 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     {
       description: "Duplicate a page and its accessible sub-pages within the same space.",
       annotations: hints("write"),
-      inputSchema: { page_id: pageId },
+      inputSchema: { page_id: pageId, verbose },
     },
     wrap(client, "write", async (args) =>
-      client.request("/pages/duplicate", { pageId: await resolvePage(client, args.page_id) }),
+      copied(await client.request("/pages/duplicate", { pageId: await resolvePage(client, args.page_id) }), args),
     ),
   );
 
@@ -308,13 +409,17 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       inputSchema: {
         page_id: pageId,
         space_id: spaceId.describe("Destination space"),
+        verbose,
       },
     },
     wrap(client, "write", async (args) =>
-      client.request("/pages/duplicate", {
-        pageId: await resolvePage(client, args.page_id),
-        spaceId: await client.resolveSpaceId(String(args.space_id)),
-      }),
+      copied(
+        await client.request("/pages/duplicate", {
+          pageId: await resolvePage(client, args.page_id),
+          spaceId: await client.resolveSpaceId(String(args.space_id)),
+        }),
+        args,
+      ),
     ),
   );
 
@@ -329,14 +434,14 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           .string()
           .nullable()
           .optional()
-          .describe("New parent page UUID or slugId. Null or omitted with root=true moves to space root"),
+          .describe("New parent UUID or slugId; null, or omitted with root=true, means space root"),
         root: z.boolean().optional().describe("Move to the space root"),
         position: z
           .enum(["first", "last"])
           .or(z.string().min(5).max(12))
           .optional()
           .describe("first, last, or an explicit fractional index"),
-        after_page_id: z.string().optional().describe("Place after this sibling page (UUID or slugId)"),
+        after_page_id: z.string().optional().describe("Place after this sibling (UUID or slugId)"),
       },
     },
     wrap(client, "write", async (args) => {
@@ -383,7 +488,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("destructive"),
       inputSchema: {
         page_id: pageId,
-        permanently: z.boolean().optional().describe("If true, permanently delete. Default false (trash)"),
+        permanently: z.boolean().optional().describe("Delete forever instead of trashing"),
       },
     },
     wrap(client, "destructive", async (args) => {
@@ -405,10 +510,10 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     {
       description: "Restore a soft-deleted page from trash.",
       annotations: hints("write"),
-      inputSchema: { page_id: pageId },
+      inputSchema: { page_id: pageId, verbose },
     },
     wrap(client, "write", async (args) =>
-      pageSummary(await client.request("/pages/restore", { pageId: await resolvePage(client, args.page_id) })),
+      ack(await client.request("/pages/restore", { pageId: await resolvePage(client, args.page_id) }), args),
     ),
   );
 
@@ -417,7 +522,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     {
       description: "List soft-deleted pages in a space.",
       annotations: hints("read"),
-      inputSchema: { space_id: spaceId, limit, cursor },
+      inputSchema: { space_id: spaceId, limit, cursor, verbose },
     },
     wrap(client, "read", async (args) => {
       const result = asItems(
@@ -427,7 +532,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
           cursor: args.cursor,
         }),
       );
-      return { items: result.items.map(pageSummary), meta: result.meta };
+      return pageList(result.items, result.meta, args);
     }),
   );
 
@@ -456,9 +561,18 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("read"),
       inputSchema: {
         history_id: z.string().uuid().describe("History version UUID"),
+        max_chars: z.number().int().min(1).optional().describe("Max characters to return"),
+        offset: z.number().int().min(0).optional().describe("Start position"),
       },
     },
-    wrap(client, "read", async (args) => client.request("/pages/history/info", { historyId: args.history_id })),
+    wrap(client, "read", async (args) => {
+      const version = (await client.request("/pages/history/info", { historyId: args.history_id })) as Json;
+      // shortcut: only a string content is capped; the real history shape was empty on the test server and is unverified.
+      const paged = args.max_chars !== undefined || args.offset !== undefined;
+      return typeof version.content === "string" && (paged || version.content.length > MAX_CONTENT_CHARS)
+        ? { ...version, ...sliceContent(version.content, args.offset as number | undefined, args.max_chars as number | undefined) }
+        : version;
+    }),
   );
 
   server.registerTool(
@@ -466,11 +580,14 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     {
       description: "Get the ancestor path from space root to a page.",
       annotations: hints("read"),
-      inputSchema: { page_id: pageId },
+      inputSchema: { page_id: pageId, verbose },
     },
-    wrap(client, "read", async (args) =>
-      client.request("/pages/breadcrumbs", { pageId: await resolvePage(client, args.page_id) }),
-    ),
+    wrap(client, "read", async (args) => {
+      const path = await client.request("/pages/breadcrumbs", { pageId: await resolvePage(client, args.page_id) });
+      return !args.verbose && Array.isArray(path)
+        ? path.map((p) => pick(p, ["id", "slugId", "title", "icon"]))
+        : path;
+    }),
   );
 
   server.registerTool(
@@ -480,7 +597,7 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("read"),
       inputSchema: {
         page_id: pageId,
-        direction: z.enum(["incoming", "outgoing"]).describe("incoming or outgoing"),
+        direction: z.enum(["incoming", "outgoing"]),
         limit,
         cursor,
       },
@@ -501,14 +618,14 @@ function registerPageTools(server: McpServer, client: DocmostClient): void {
     "export_page",
     {
       description:
-        "Export a page to a local file. A page without children is often a .md or .html file; include_children usually returns a zip. Writes to output_path or a temp file and returns the path plus content type.",
+        "Export a page to output_path or a temp file and return the path. Without children usually .md/.html; include_children gives a zip.",
       annotations: hints("read"),
       inputSchema: {
         page_id: pageId,
         format: z.enum(["markdown", "html"]).optional(),
         include_children: z.boolean().optional(),
         include_attachments: z.boolean().optional(),
-        output_path: z.string().optional().describe("Where to write the exported file"),
+        output_path: z.string().optional().describe("Where to write the file"),
       },
     },
     wrap(client, "read", async (args) => {
@@ -611,7 +728,7 @@ function registerSpaceTools(server: McpServer, client: DocmostClient): void {
       annotations: hints("destructive"),
       inputSchema: {
         space_id: spaceId,
-        confirm: z.literal(true).describe("Must be true to confirm deletion"),
+        confirm: z.literal(true).describe("Must be true"),
       },
     },
     wrap(client, "destructive", async (args) => {
@@ -685,7 +802,7 @@ function registerCommentTools(server: McpServer, client: DocmostClient): void {
       inputSchema: {
         page_id: pageId,
         markdown: z.string().min(1).describe("Comment body as Markdown"),
-        parent_comment_id: z.string().uuid().optional().describe("Parent comment UUID to reply"),
+        parent_comment_id: z.string().uuid().optional().describe("Reply to this comment"),
       },
     },
     wrap(client, "write", async (args) =>
@@ -739,7 +856,7 @@ function registerSearchTools(server: McpServer, client: DocmostClient): void {
     "search_attachments",
     {
       description:
-        "Search file attachments by name or indexed text. This is an Enterprise feature; Community Edition returns 403. Prefer get_attachment_info when you already have an attachment id.",
+        "Search attachments by name or text. Enterprise only: Community gets 403. Prefer get_attachment_info when you have an id.",
       annotations: hints("read"),
       inputSchema: {
         query: z.string().min(1),
@@ -781,10 +898,11 @@ function registerSearchTools(server: McpServer, client: DocmostClient): void {
           .optional()
           .describe("Include page titles. Default true"),
         limit,
+        verbose,
       },
     },
-    wrap(client, "read", async (args) =>
-      client.request("/search/suggest", {
+    wrap(client, "read", async (args) => {
+      const found = (await client.request("/search/suggest", {
         query: args.query,
         spaceId: args.space_id
           ? await client.resolveSpaceId(String(args.space_id))
@@ -793,8 +911,11 @@ function registerSearchTools(server: McpServer, client: DocmostClient): void {
         includeGroups: args.include_groups ?? false,
         includePages: args.include_pages ?? true,
         limit: args.limit,
-      }),
-    ),
+      })) as Json;
+      return !args.verbose && Array.isArray(found.pages)
+        ? { ...found, pages: found.pages.map((page) => omit(page, ["spaceId"])) }
+        : found;
+    }),
   );
 }
 
@@ -805,11 +926,18 @@ function registerWorkspaceTools(server: McpServer, client: DocmostClient): void 
       description:
         "Get the authenticated user and workspace context, detected Docmost version, and whether this session is read-only.",
       annotations: hints("read"),
+      inputSchema: { verbose },
     },
-    wrap(client, "read", async () => {
+    wrap(client, "read", async (args) => {
       const me = (await client.request("/users/me", {})) as Json;
       const probe = await client.sessionInfo();
-      return { ...me, ...probe };
+      return args.verbose
+        ? { ...me, ...probe }
+        : {
+            user: pick(me.user, ["id", "name", "email", "role", "workspaceId"]),
+            workspace: pick(me.workspace, ["id", "name", "defaultSpaceId", "memberCount"]),
+            ...probe,
+          };
     }),
   );
 
@@ -822,15 +950,18 @@ function registerWorkspaceTools(server: McpServer, client: DocmostClient): void 
         limit,
         cursor,
         query: z.string().optional().describe("Optional member search text"),
+        verbose,
       },
     },
     wrap(client, "read", async (args) =>
-      asItems(
+      slimItems(
         await client.request("/workspace/members", {
           limit: args.limit ?? 50,
           cursor: args.cursor,
           query: args.query,
         }),
+        (m) => pick(m, ["id", "name", "email", "role"]),
+        args,
       ),
     ),
   );
@@ -844,7 +975,7 @@ function registerAttachmentTools(server: McpServer, client: DocmostClient): void
       annotations: hints("write"),
       inputSchema: {
         page_id: pageId,
-        file_path: z.string().min(1).describe("Absolute path to a local file"),
+        file_path: z.string().min(1).describe("Absolute local path"),
       },
     },
     wrap(client, "write", async (args) =>
@@ -929,15 +1060,17 @@ function registerMemberTools(server: McpServer, client: DocmostClient): void {
     {
       description: "List members and groups in a space.",
       annotations: hints("read"),
-      inputSchema: { space_id: spaceId, limit, cursor },
+      inputSchema: { space_id: spaceId, limit, cursor, verbose },
     },
     wrap(client, "read", async (args) =>
-      asItems(
+      slimItems(
         await client.request("/spaces/members", {
           spaceId: await client.resolveSpaceId(String(args.space_id)),
           limit: args.limit ?? 50,
           cursor: args.cursor,
         }),
+        (m) => omit(m, ["avatarUrl", "createdAt"]),
+        args,
       ),
     ),
   );

@@ -2,6 +2,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "./errors.js";
 
+export const TOOLSET_NAMES = [
+  "pages",
+  "spaces",
+  "comments",
+  "search",
+  "workspace",
+  "attachments",
+  "labels",
+  "members",
+] as const;
+export type ToolsetName = (typeof TOOLSET_NAMES)[number];
+
 export type DocmostConfig = {
   baseUrl: string;
   email?: string;
@@ -9,6 +21,7 @@ export type DocmostConfig = {
   authToken?: string;
   sessionPath: string;
   readOnly: boolean;
+  toolsets?: ToolsetName[];
 };
 
 function required(name: string): string {
@@ -27,6 +40,21 @@ function optional(name: string): string | undefined {
 function optionalFlag(name: string): boolean {
   const value = process.env[name]?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
+}
+
+// Unset means every tool. Unknown names fail at startup instead of silently hiding tools.
+function toolsets(): ToolsetName[] | undefined {
+  const names = (optional("DOCMOST_TOOLSETS") ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  const unknown = names.filter((name) => !(TOOLSET_NAMES as readonly string[]).includes(name));
+  if (unknown.length > 0) {
+    throw new ConfigError(
+      `Unknown DOCMOST_TOOLSETS: ${unknown.join(", ")}. Valid names: ${TOOLSET_NAMES.join(", ")}`,
+    );
+  }
+  return names.length > 0 ? (names as ToolsetName[]) : undefined;
 }
 
 export function loadConfig(): DocmostConfig {
@@ -51,5 +79,6 @@ export function loadConfig(): DocmostConfig {
       optional("DOCMOST_SESSION_PATH") ??
       join(homedir(), ".docmost-community-mcp", "session.json"),
     readOnly: optionalFlag("DOCMOST_READ_ONLY"),
+    toolsets: toolsets(),
   };
 }

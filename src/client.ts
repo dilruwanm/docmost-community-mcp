@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import type { DocmostConfig } from "./config.js";
 import { ConfigError, DocmostError, VersionError } from "./errors.js";
 import {
+  applyEdits,
   asItems,
   compareSemver,
   decodeJwtExpiry,
@@ -11,12 +12,13 @@ import {
   parseVersion,
   readSession,
   type Json,
+  type PageEdit,
   unwrap,
   writeSession,
 } from "./util.js";
 
 export const MIN_WRITE_VERSION = "0.71.0";
-const USER_AGENT = "docmost-community-mcp/1.0.1";
+const USER_AGENT = "docmost-community-mcp/1.1.0";
 
 export type Pagination = {
   limit?: number;
@@ -256,6 +258,30 @@ export class DocmostClient {
     if (typeof content === "string" && sentMarkdown.trim() && !content.trim()) {
       throw new DocmostError("Page update returned empty Markdown content");
     }
+  }
+
+  // Read the page as ProseMirror JSON, apply every edit in memory, write once. Untouched nodes are sent back as read.
+  async editPage(pageIdOrSlug: string, edits: PageEdit[], expectedUpdatedAt?: string): Promise<Json> {
+    await this.assertWritable();
+    const page = (await this.request("/pages/info", { pageId: pageIdOrSlug, format: "json" })) as Json;
+    const raw = page.content;
+    const doc = (typeof raw === "string" ? JSON.parse(raw) : raw) as Json | undefined;
+    if (!doc || typeof doc !== "object" || typeof page.id !== "string") {
+      throw new DocmostError(`Page not found or has no readable body: ${pageIdOrSlug}`);
+    }
+    if (expectedUpdatedAt && Date.parse(String(page.updatedAt)) !== Date.parse(expectedUpdatedAt)) {
+      throw new DocmostError(
+        `Page changed since ${expectedUpdatedAt} (now ${String(page.updatedAt)}). Nothing was written; read the page again and retry.`,
+      );
+    }
+    const { doc: edited, applied } = applyEdits(doc, edits);
+    const updated = (await this.request("/pages/update", {
+      pageId: page.id,
+      content: edited,
+      format: "json",
+      operation: "replace",
+    })) as Json;
+    return { id: updated.id ?? page.id, slugId: updated.slugId ?? page.slugId, title: updated.title ?? page.title, updatedAt: updated.updatedAt, edits: applied };
   }
 
   async resolveSpaceId(spaceIdOrSlug: string): Promise<string> {

@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000007",
+      "slugId": "RcqvRXFE7L",
+      "title": "T1 spike",
+      "icon": null,
+      "parentPageId": null,
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "createdAt": "2026-11-21T12:48:56.541Z",
+      "updatedAt": "2026-11-21T12:49:17.939Z",
+      "rank": 0.66871977,
+      "highlight": "Intro paragraph EDITED by <b>spike</b>. Section A Alpha paragraph with",
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      },
+      "wholeWord": true,
+      "matchedText": [
+        "spike"
+      ]
+    }
+  ]
+}

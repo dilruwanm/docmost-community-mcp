@@ -1,0 +1,48 @@
+{
+  "id": "f0000000-0000-4000-8000-000000000006",
+  "slugId": "CLLGqk5be9",
+  "title": "T1 child",
+  "icon": null,
+  "coverPhoto": null,
+  "position": "a001U",
+  "parentPageId": "f0000000-0000-4000-8000-000000000002",
+  "creatorId": "f0000000-0000-4000-8000-000000000003",
+  "lastUpdatedById": "f0000000-0000-4000-8000-000000000003",
+  "spaceId": "f0000000-0000-4000-8000-000000000004",
+  "workspaceId": "f0000000-0000-4000-8000-000000000005",
+  "isLocked": false,
+  "isBase": false,
+  "createdAt": "2026-11-21T12:49:48.739Z",
+  "updatedAt": "2026-11-21T12:49:54.150Z",
+  "deletedAt": null,
+  "contributorIds": [
+    "f0000000-0000-4000-8000-000000000003"
+  ],
+  "content": "Child body 2.",
+  "creator": {
+    "id": "f0000000-0000-4000-8000-000000000003",
+    "name": "Test User",
+    "avatarUrl": null
+  },
+  "lastUpdatedBy": {
+    "id": "f0000000-0000-4000-8000-000000000003",
+    "name": "Test User",
+    "avatarUrl": null
+  },
+  "contributors": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000003",
+      "name": "Test User",
+      "avatarUrl": null
+    }
+  ],
+  "space": {
+    "id": "f0000000-0000-4000-8000-000000000004",
+    "name": "MCP Sandbox",
+    "slug": "mcp-sandbox"
+  },
+  "permissions": {
+    "canEdit": true,
+    "hasRestriction": false
+  }
+}
