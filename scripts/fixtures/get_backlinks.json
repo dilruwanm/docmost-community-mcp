@@ -1,0 +1,10 @@
+{
+  "items": [],
+  "meta": {
+    "limit": 50,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "nextCursor": null,
+    "prevCursor": null
+  }
+}

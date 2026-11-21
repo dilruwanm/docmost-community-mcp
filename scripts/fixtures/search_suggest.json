@@ -1,0 +1,42 @@
+{
+  "users": [],
+  "groups": [],
+  "pages": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000006",
+      "slugId": "CLLGqk5be9",
+      "title": "T1 child",
+      "icon": null,
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      }
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000007",
+      "slugId": "RcqvRXFE7L",
+      "title": "T1 spike",
+      "icon": null,
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      }
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000002",
+      "slugId": "JPgQmHBMZB",
+      "title": "T1 parent",
+      "icon": null,
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      }
+    }
+  ]
+}

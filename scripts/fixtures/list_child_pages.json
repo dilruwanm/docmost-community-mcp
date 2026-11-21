@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000006",
+      "slugId": "CLLGqk5be9",
+      "title": "T1 child",
+      "icon": null,
+      "position": "a001U",
+      "parentPageId": "f0000000-0000-4000-8000-000000000002",
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "isBase": false,
+      "deletedAt": null,
+      "hasChildren": false,
+      "canEdit": true
+    }
+  ],
+  "meta": {
+    "limit": 50,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "nextCursor": null,
+    "prevCursor": null
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "items": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000006",
+      "slugId": "CLLGqk5be9",
+      "title": "T1 child",
+      "icon": null,
+      "coverPhoto": null,
+      "position": "a001U",
+      "parentPageId": "f0000000-0000-4000-8000-000000000002",
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "lastUpdatedById": "f0000000-0000-4000-8000-000000000003",
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "workspaceId": "f0000000-0000-4000-8000-000000000005",
+      "isLocked": false,
+      "isBase": false,
+      "createdAt": "2026-11-21T12:49:48.739Z",
+      "updatedAt": "2026-11-21T12:49:48.739Z",
+      "deletedAt": null,
+      "contributorIds": [],
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      }
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000002",
+      "slugId": "JPgQmHBMZB",
+      "title": "T1 parent",
+      "icon": null,
+      "coverPhoto": null,
+      "position": "a13Fz",
+      "parentPageId": null,
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "lastUpdatedById": "f0000000-0000-4000-8000-000000000003",
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "workspaceId": "f0000000-0000-4000-8000-000000000005",
+      "isLocked": false,
+      "isBase": false,
+      "createdAt": "2026-11-21T12:49:48.257Z",
+      "updatedAt": "2026-11-21T12:49:48.257Z",
+      "deletedAt": null,
+      "contributorIds": [],
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      }
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000007",
+      "slugId": "RcqvRXFE7L",
+      "title": "T1 spike",
+      "icon": null,
+      "coverPhoto": null,
+      "position": "a0ByJ",
+      "parentPageId": null,
+      "creatorId": "f0000000-0000-4000-8000-000000000003",
+      "lastUpdatedById": "f0000000-0000-4000-8000-000000000003",
+      "spaceId": "f0000000-0000-4000-8000-000000000004",
+      "workspaceId": "f0000000-0000-4000-8000-000000000005",
+      "isLocked": false,
+      "isBase": false,
+      "createdAt": "2026-11-21T12:48:56.541Z",
+      "updatedAt": "2026-11-21T12:49:17.939Z",
+      "deletedAt": null,
+      "contributorIds": [
+        "f0000000-0000-4000-8000-000000000003"
+      ],
+      "space": {
+        "id": "f0000000-0000-4000-8000-000000000004",
+        "name": "MCP Sandbox",
+        "slug": "mcp-sandbox"
+      }
+    }
+  ],
+  "meta": {
+    "limit": 50,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "nextCursor": null,
+    "prevCursor": null
+  }
+}

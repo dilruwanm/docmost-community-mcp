@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { DocmostError } from "./errors.js";
 
 export type Json = Record<string, unknown>;
 
@@ -273,6 +274,300 @@ export function proseMirrorToMarkdown(value: unknown): string {
   return renderPm(value).replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
+export type Heading = { level: number; text: string; offset: number };
+export type SectionRange = { start: number; end: number };
+
+function nodeText(node: unknown): string {
+  const n = node as Json;
+  if (typeof n?.text === "string") {
+    return n.text;
+  }
+  return Array.isArray(n?.content) ? n.content.map(nodeText).join("") : "";
+}
+
+function topLevel(doc: Json): Json[] {
+  return Array.isArray(doc.content) ? (doc.content as Json[]) : [];
+}
+
+function headingLevel(node: Json): number {
+  return node.type === "heading" ? Number((node.attrs as Json | undefined)?.level ?? 1) : 0;
+}
+
+// shortcut: only top-level headings count as sections, not ones inside callouts or tables; upgrade if agents need them
+// offset is the heading's character position in proseMirrorToMarkdown(doc), so get_page can page to it.
+export function outline(doc: Json): Heading[] {
+  const blocks = topLevel(doc);
+  const found: Heading[] = [];
+  blocks.forEach((node, i) => {
+    if (headingLevel(node)) {
+      const before = proseMirrorToMarkdown({ type: "doc", content: blocks.slice(0, i) });
+      found.push({
+        level: headingLevel(node),
+        text: nodeText(node).trim(),
+        offset: i === 0 ? 0 : before.length + 2,
+      });
+    }
+  });
+  return found;
+}
+
+const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+
+// "Text" matches any level; "## Text" pins the level. A section runs to the next heading of the same or higher level.
+export function findSection(doc: Json, heading: string): SectionRange {
+  const pin = /^(#{1,6})\s+(.*)$/.exec(heading.trim());
+  const level = pin?.[1]?.length;
+  const wanted = norm(pin?.[2] ?? heading);
+  const blocks = topLevel(doc);
+  const hits: number[] = [];
+  blocks.forEach((node, i) => {
+    const l = headingLevel(node);
+    if (l && (!level || l === level) && norm(nodeText(node)) === wanted) {
+      hits.push(i);
+    }
+  });
+  if (hits.length === 0) {
+    const names = blocks.filter(headingLevel).map((n) => `"${"#".repeat(headingLevel(n))} ${nodeText(n).trim()}"`);
+    throw new DocmostError(`Heading not found: "${heading}". Headings on this page: ${names.slice(0, 30).join(", ") || "none"}`);
+  }
+  if (hits.length > 1) {
+    const where = hits.map((i) => `level ${headingLevel(blocks[i] as Json)}`).join(", ");
+    throw new DocmostError(`Heading "${heading}" matches ${hits.length} sections (${where}). Pin the level with "## ${heading}" or use replace_text.`);
+  }
+  const start = hits[0] as number;
+  const startLevel = headingLevel(blocks[start] as Json);
+  let end = start + 1;
+  while (end < blocks.length) {
+    const l = headingLevel(blocks[end] as Json);
+    if (l && l <= startLevel) {
+      break;
+    }
+    end += 1;
+  }
+  return { start, end };
+}
+
+// shortcut: a match must sit inside one block (paragraph, heading, list item); upgrade if agents need cross-paragraph replace.
+// A match across formatted runs puts the new text in the first run, so it keeps that run's marks.
+export function replaceTextInDoc(
+  doc: Json,
+  oldText: string,
+  newText: string,
+  all = false,
+): { doc: Json; count: number } {
+  if (!oldText) {
+    throw new DocmostError("old_text must not be empty");
+  }
+  const next = structuredClone(doc);
+  const blocks: Json[] = [];
+  const walk = (node: Json) => {
+    const kids = Array.isArray(node.content) ? (node.content as Json[]) : [];
+    if (kids.some((k) => k.type === "text")) {
+      blocks.push(node);
+    } else {
+      kids.forEach(walk);
+    }
+  };
+  walk(next);
+
+  // Non-text inline nodes (mentions, breaks) become U+FFFC so a match can never span them.
+  const joined = (node: Json) =>
+    (node.content as Json[]).map((k) => (k.type === "text" ? (k.text as string) : "￼")).join("");
+  const hits = blocks.map((block) => {
+    const text = joined(block);
+    const at: number[] = [];
+    for (let i = text.indexOf(oldText); i >= 0; i = text.indexOf(oldText, i + oldText.length)) {
+      at.push(i);
+    }
+    return at;
+  });
+  const count = hits.reduce((n, at) => n + at.length, 0);
+  if (count === 0) {
+    throw new DocmostError(
+      "old_text not found. It must match exactly and sit inside one paragraph, heading or list item.",
+    );
+  }
+  if (count > 1 && !all) {
+    const seen = blocks.flatMap((b, i) => (hits[i]?.length ? [`"${joined(b).slice(0, 60)}"`] : []));
+    throw new DocmostError(
+      `old_text matches ${count} places (in ${seen.slice(0, 3).join(", ")}). Add surrounding text to make it unique, or set replace_all.`,
+    );
+  }
+
+  blocks.forEach((block, bi) => {
+    for (const s of [...(hits[bi] ?? [])].reverse()) {
+      const e = s + oldText.length;
+      let pos = 0;
+      let placed = false;
+      const out: Json[] = [];
+      for (const k of block.content as Json[]) {
+        const len = k.type === "text" ? (k.text as string).length : 1;
+        const a = pos;
+        pos += len;
+        if (k.type !== "text" || pos <= s || a >= e) {
+          out.push(k);
+          continue;
+        }
+        const t = k.text as string;
+        const text = t.slice(0, Math.max(0, s - a)) + (placed ? "" : newText) + t.slice(Math.max(0, e - a));
+        placed = true;
+        if (text) {
+          out.push({ ...k, text });
+        }
+      }
+      block.content = out;
+    }
+  });
+  return { doc: next, count };
+}
+
+const UNSUPPORTED: [string, RegExp][] = [
+  ["table", /^\s*\|.*\|\s*$/],
+  ["blockquote", /^\s*>/],
+  ["callout", /^\s*:::/],
+  ["task list", /^\s*[-*+]\s+\[[ xX]\]\s/],
+  ["nested list", /^\s{2,}([-*+]|\d+[.)])\s/],
+  ["horizontal rule", /^\s*([-*_])(\s*\1){2,}\s*$/],
+  ["image", /!\[[^\]]*\]\(/],
+];
+
+// New content goes through the small local converter, so anything it cannot represent is refused, never mangled.
+function markdownToBlocks(markdown: string): Json[] {
+  let fenced = false;
+  markdown.split(/\r?\n/).forEach((line, i) => {
+    if (line.trimStart().startsWith("```")) {
+      fenced = !fenced;
+    } else if (!fenced) {
+      const hit = UNSUPPORTED.find(([, re]) => re.test(line));
+      if (hit) {
+        throw new DocmostError(
+          `Unsupported Markdown: ${hit[0]} (line ${i + 1}). Section edits support headings, paragraphs, one-level bullet and numbered lists, fenced code, and bold, italic, code and links. Use replace_text to change text inside existing rich content.`,
+        );
+      }
+    }
+  });
+  const blocks = (markdownToProseMirror(markdown).content as Json[]).filter((b) => b.content);
+  const stamp = (n: Json) => {
+    if (n.type === "paragraph" || n.type === "heading") {
+      n.attrs = { ...(n.attrs as Json | undefined), id: randomId() };
+    }
+    (Array.isArray(n.content) ? (n.content as Json[]) : []).forEach(stamp);
+  };
+  blocks.forEach(stamp);
+  return blocks;
+}
+
+// Docmost blocks carry a 12-letter id; new blocks get a fresh one.
+function randomId(): string {
+  return Array.from({ length: 12 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
+}
+
+function editBlocks(
+  doc: Json,
+  heading: string,
+  change: (r: SectionRange, blocks: Json[]) => [number, number, Json[]],
+): Json {
+  const next = structuredClone(doc);
+  const [at, remove, add] = change(findSection(next, heading), topLevel(next));
+  topLevel(next).splice(at, remove, ...add);
+  return next;
+}
+
+// Keeps the heading, replaces everything under it (subsections included) until the next heading of the same or higher level.
+export function replaceSection(doc: Json, heading: string, markdown: string): Json {
+  return editBlocks(doc, heading, (r) => [r.start + 1, r.end - r.start - 1, markdownToBlocks(markdown)]);
+}
+
+export function insertAfterSection(doc: Json, heading: string, markdown: string): Json {
+  if (!markdown.trim()) {
+    throw new DocmostError("markdown must not be empty for insert_after_section");
+  }
+  return editBlocks(doc, heading, (r) => [r.end, 0, markdownToBlocks(markdown)]);
+}
+
+// at=start: right under the heading. at=end: the end of the section's own body, before its first subsection.
+export function insertInSection(doc: Json, heading: string, markdown: string, at = "end"): Json {
+  if (at !== "start" && at !== "end") {
+    throw new DocmostError('at must be "start" or "end"');
+  }
+  if (!markdown.trim()) {
+    throw new DocmostError("markdown must not be empty for insert_in_section");
+  }
+  return editBlocks(doc, heading, (r, blocks) => {
+    const firstSub = blocks.findIndex((b, i) => i > r.start && i < r.end && headingLevel(b) > 0);
+    const where = at === "start" ? r.start + 1 : firstSub === -1 ? r.end : firstSub;
+    return [where, 0, markdownToBlocks(markdown)];
+  });
+}
+
+export function deleteSection(doc: Json, heading: string): Json {
+  return editBlocks(doc, heading, (r) => [r.start, r.end - r.start, []]);
+}
+
+export type PageEdit = {
+  mode: "replace_text" | "replace_section" | "insert_after_section" | "insert_in_section" | "delete_section";
+  old_text?: string;
+  new_text?: string;
+  replace_all?: boolean;
+  heading?: string;
+  markdown?: string;
+  at?: "start" | "end";
+};
+
+// Applies edits in order, in memory. Any failure throws and names the edit, so the caller writes nothing.
+export function applyEdits(doc: Json, edits: PageEdit[]): { doc: Json; applied: Json[] } {
+  let current = doc;
+  const applied: Json[] = [];
+  edits.forEach((edit, i) => {
+    const need = <T>(value: T | undefined, name: string): T => {
+      if (value === undefined) {
+        throw new DocmostError(`${name} is required for ${edit.mode}`);
+      }
+      return value;
+    };
+    try {
+      if (edit.mode === "replace_text") {
+        const r = replaceTextInDoc(current, need(edit.old_text, "old_text"), need(edit.new_text, "new_text"), edit.replace_all);
+        current = r.doc;
+        applied.push({ mode: edit.mode, replaced: r.count });
+        return;
+      }
+      const heading = need(edit.heading, "heading");
+      if (edit.mode === "replace_section") {
+        current = replaceSection(current, heading, need(edit.markdown, "markdown"));
+      } else if (edit.mode === "insert_after_section") {
+        current = insertAfterSection(current, heading, need(edit.markdown, "markdown"));
+      } else if (edit.mode === "insert_in_section") {
+        current = insertInSection(current, heading, need(edit.markdown, "markdown"), edit.at);
+      } else {
+        current = deleteSection(current, heading);
+      }
+      applied.push({ mode: edit.mode, heading });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DocmostError(`Edit #${i + 1} (${edit.mode}) failed, nothing was written: ${message}`);
+    }
+  });
+  return { doc: current, applied };
+}
+
+// Longest page body returned in one call; past this the caller follows next_offset.
+export const MAX_CONTENT_CHARS = 40_000;
+
+// truncated and next_offset are present only while more text remains, so following them reassembles the original exactly.
+export function sliceContent(text: string, offset = 0, max = MAX_CONTENT_CHARS): Json {
+  const end = offset + max;
+  return {
+    content: text.slice(offset, end),
+    total_chars: text.length,
+    ...(end < text.length ? { truncated: true, next_offset: end } : {}),
+  };
+}
+
+export function sectionToMarkdown(doc: Json, range: SectionRange): string {
+  return proseMirrorToMarkdown({ type: "doc", content: topLevel(doc).slice(range.start, range.end) });
+}
+
 function renderPm(value: unknown): string {
   if (value == null) {
     return "";
@@ -452,7 +747,8 @@ function midpoint(a: string, b: string): string {
 }
 
 export function textResult(data: unknown): { content: { type: "text"; text: string }[] } {
-  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  // Compact, and null object fields are omitted (absent means null); array slots keep their position.
+  const text = typeof data === "string" ? data : JSON.stringify(data, (_k, v) => (v === null ? undefined : v));
   return { content: [{ type: "text", text }] };
 }
 
@@ -462,6 +758,24 @@ export function errorResult(error: unknown): {
 } {
   const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+const asRecord = (v: unknown): Json => (v && typeof v === "object" ? (v as Json) : {});
+
+export const pick = (v: unknown, keys: string[]): Json =>
+  Object.fromEntries(keys.map((k) => [k, asRecord(v)[k]]));
+
+export const omit = (v: unknown, keys: string[]): Json =>
+  Object.fromEntries(Object.entries(asRecord(v)).filter(([k]) => !keys.includes(k)));
+
+// Default list item; verbose=true returns pageSummary instead.
+export function slimPage(page: unknown): Json {
+  return pick(page, ["id", "slugId", "title", "icon", "parentPageId", "hasChildren", "updatedAt"]);
+}
+
+// Default result of a write; verbose=true returns pageSummary instead.
+export function pageAck(page: unknown): Json {
+  return pick(page, ["id", "slugId", "title", "updatedAt"]);
 }
 
 export function pageSummary(page: unknown): Json {

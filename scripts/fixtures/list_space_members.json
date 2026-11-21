@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000003",
+      "name": "Test User",
+      "email": "user@example.com",
+      "avatarUrl": null,
+      "type": "user",
+      "role": "admin",
+      "createdAt": "2026-11-21T12:48:11.153Z"
+    }
+  ],
+  "meta": {
+    "limit": 50,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "nextCursor": null,
+    "prevCursor": null
+  }
+}
