@@ -4,6 +4,9 @@ Server: a self-hosted Docmost v0.96.0 instance. Space: `mcp-sandbox` only (each 
 
 Result: **37/37 automated checks passed, plus the UI comment check** (first run 34/36; both failures were my test ordering, see "Known behavior").
 
+## Rerun after the dependency update
+After `npm audit fix` moved the MCP SDK from 1.30.0 to 1.32.2, the whole suite was rerun: build, 47 unit tests, sizes (tool list still 24,514 characters, 42 tools) and a fresh live smoke run of **38/38** checks, including `insert_in_section` and the UI-made comment surviving a further edit. Only `package-lock.json` changed.
+
 ## Passed (live)
 - **Read side:** `get_page` `outline` lists the headings and every offset lands on its heading in the Markdown body; `heading` returns a section including its subsection; an unknown heading errors and lists the page's headings.
 - **`edit_page`:**

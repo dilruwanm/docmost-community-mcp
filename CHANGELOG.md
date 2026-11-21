@@ -32,6 +32,7 @@ Results are smaller by default to save AI context. Anything that parses a field 
 - **Unchanged:** `get_page` metadata and body, `get_page_history`, `get_history_version`, `get_backlinks`, `list_page_labels`, `get_comments` and `move_page`. Their real payloads were empty or already small on the test server.
 - Tool annotations now send only what differs from the MCP defaults (`readOnlyHint: true` for reads, `destructiveHint` for writes). `openWorldHint` and the redundant `readOnlyHint: false` / `destructiveHint: false` are no longer sent. Clients that follow the MCP spec's defaults see no difference.
 - Tool and parameter descriptions are shorter; usage hints are kept.
+- Dependencies: the lockfile now resolves `@modelcontextprotocol/sdk` 1.32.2 (was 1.30.0) and patched transitive packages (`hono`, `body-parser`, `qs`, `proxy-addr`, `fast-uri`, `ip-address`, `@hono/node-server`), clearing 8 of the 9 advisories `npm audit` reported for production dependencies. The remaining one is `zod` 3.x (memory use when validating oversized collections); the fix is the zod 4 major upgrade, which is not part of this release. `package.json` ranges are unchanged, so installs from npm already resolved current versions.
 
 Measured with `npm run measure` on the same code paths (sizes in characters; tokens are a rough estimate of characters / 3.5):
 
